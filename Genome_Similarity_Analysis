@@ -1,0 +1,107 @@
+import pandas as pd
+from pandas import ExcelWriter
+
+##load the data from the consensus table
+consensus_df = pd.read_csv('MiniMUGA Consensus Calls.csv', dtype=str)
+consensus_df = consensus_df.astype(str)
+## delete unnnecessary columns at the beginning
+del consensus_df['chromosome']
+del consensus_df['position']
+## Create a variable with all columns to iterate over - represents all possible mouse stems
+mouse_stems = list(consensus_df.columns)[1:]
+## Chamge all data to upper case
+for column in consensus_df.columns[1:]:
+    consensus_df[column] = consensus_df[column].str.upper()
+
+## load mouse genome data
+## First, specify new columns and drop header rows
+fields = ['SNP Name', 'Sample ID', 'Allele1 - Forward', 'Allele2 - Forward', 'X', 'Y', 'GC Score', 'Theta', 'X Raw', 'Y Raw', 'R']
+mouse_df = pd.read_csv('CECAD_Research_Centre_MURCOMV02_20191210_FinalReport.txt', skiprows=10, delimiter='\t',header = None, names= fields)
+## Change dataframe to strings
+mouse_df = mouse_df.astype(str)
+## Only keep data from one mouse --> this needs to be adapted for any new data as name of sample changes
+mouse_df = mouse_df[mouse_df['Sample ID'] == 'am4346']
+## Only keep columns 'SNP Name', 'Allele1 - Forward' & 'Allele2 - Forward'
+mouse_df = mouse_df[['SNP Name', 'Allele1 - Forward', 'Allele2 - Forward']]
+rows_before_drop = mouse_df.shape[0]
+## Drop all rows that do not match 'G', 'T', 'A' or 'C' in 'Allele1 - Forward' and'Allele2 - Forward'
+mouse_df = mouse_df[mouse_df['Allele1 - Forward'].isin(['G', 'T', 'A', 'C'])]
+mouse_df = mouse_df[mouse_df['Allele2 - Forward'].isin(['G', 'T', 'A', 'C'])]
+rows_after_drop = mouse_df.shape[0]
+lost_rows = rows_before_drop - rows_after_drop
+## Rename the SNP Name column to match the consensus dataframe for merge later on
+mouse_df.columns = ['name', 'Allele1 - Forward', 'Allele2 - Forward']
+print('Data has been preprocessed.')
+print(lost_rows, ' samples / rows in original data were dropped because data did not match G, T, A or C.\n')
+
+## Calculate Matching of Mouse Genome between Alelle1 and Allele2
+print('Calculating Similarity between genome data in column Allele1 and Allele2.\n')
+count_matches = 0
+for index, row in mouse_df.iterrows():
+    if row['Allele1 - Forward'] == row['Allele2 - Forward']:
+        count_matches += 1
+print('Result: ',mouse_df.shape[0], 'rows have been compared:', count_matches, 'rows matched. This equals', round(count_matches/mouse_df.shape[0], 4),'%\n')
+
+## Merge the two dataframes by name
+merged_df = pd.merge(mouse_df, consensus_df, on = 'name')
+sample_total = merged_df.shape[0]
+
+##Create reults datafram
+columns = [merged_df.columns[3:]]
+columns
+results_df = pd.DataFrame(columns = columns)
+rows = ['Matches Allele1', 'Matches Allele2', 'Matches Allele1 or Allele2', 'Similarity']
+number_of_rows = len(rows)
+for i in range(number_of_rows):
+    results_df = results_df.append(pd.Series(0, index=results_df.columns), ignore_index=True)
+for i in range(number_of_rows):
+    results_df.rename(index = {i:rows[i]}, inplace=True)
+
+## Calculate Matches Allele1 or Allele2 and Similarity Measure
+print('Calculating similarity measure... \nProgress: \n0 %')
+percentage = 0
+for column in merged_df.columns[3:]:
+    count_true = 0
+    for index, row in merged_df.iterrows():
+        if row[column] == row['Allele1 - Forward'] or row[column] == row['Allele2 - Forward']:
+            count_true += 1
+    percentage += 1
+    if percentage %20 == 0:
+        print(int(round((percentage / len(mouse_stems)*100), 0)),'%')
+    results_df.loc['Matches Allele1 or Allele2'][column] = count_true
+    results_df.loc['Similarity'][column] = count_true/sample_total
+print('100%! Calculation done!')
+
+## Match Calculation Allele1
+print('Calculating Matches of column Allele1... \nProgress:\n0 %')
+percentage = 0
+for column in merged_df.columns[3:]:
+    count_true = 0
+    for index, row in merged_df.iterrows():
+        if row[column] == row['Allele1 - Forward']:
+            count_true += 1
+    percentage += 1
+    if percentage %20 == 0:
+        print(int(round((percentage / len(mouse_stems)*100), 0)),'%')
+    results_df.loc['Matches Allele1'][column] = count_true
+## Match Calculation Allele2
+print('Calculating Matches of column Allele2... \nProgress:\n0 %')
+percentage = 0
+for column in merged_df.columns[3:]:
+    count_true = 0
+    for index, row in merged_df.iterrows():
+        if row[column] == row['Allele2 - Forward']:
+            count_true += 1
+    percentage += 1
+    if percentage %20 == 0:
+        print(int(round((percentage / len(mouse_stems)*100), 0)),'%')
+    results_df.loc['Matches Allele2'][column] = count_true
+print('100%! Calculation done!\n')
+
+## Export results to Excel
+print('Exporting results to Excel...')
+results_df = results_df.transpose()
+writer = ExcelWriter('200125_CECAD_Similarity Analysis_Mouse Genoms.xls')
+results_df.to_excel(writer)
+writer.save()
+print('Done. Please find the results in the Excel file in the same folder as this script.')
